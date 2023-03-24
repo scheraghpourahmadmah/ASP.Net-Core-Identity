@@ -1,5 +1,6 @@
 ﻿using IdentityManager.Models;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 
@@ -9,10 +10,12 @@ namespace IdentityManager.Controllers
     {
         private readonly UserManager<IdentityUser> _userManager;
         private readonly SignInManager<IdentityUser> _signInManager;
+        private readonly IEmailSender _emailSender;
 
-        public AccountController(UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
+        public AccountController(UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager, IEmailSender emailSender)
         {
             _userManager = userManager;
+            _emailSender = emailSender;
             _signInManager = signInManager;
         }
 
@@ -22,7 +25,7 @@ namespace IdentityManager.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> Register(string returnurl=null)
+        public async Task<IActionResult> Register(string returnurl = null)
         {
             ViewData["ReturnUrl"] = returnurl;
             RegisterViewModel registerViewModel = new RegisterViewModel();
@@ -35,12 +38,12 @@ namespace IdentityManager.Controllers
         {
             ViewData["ReturnUrl"] = returnurl;
             returnurl = returnurl ?? Url.Content("~/");
-            if (ModelState.IsValid) 
+            if (ModelState.IsValid)
             {
                 var user = new ApplicationUser { UserName = model.Email, Email = model.Email, Name = model.Name };
-                var result = await _userManager.CreateAsync(user,model.Password);
+                var result = await _userManager.CreateAsync(user, model.Password);
 
-                if(result.Succeeded)
+                if (result.Succeeded)
                 {
                     await _signInManager.SignInAsync(user, isPersistent: false);
                     return LocalRedirect(returnurl);
@@ -60,7 +63,7 @@ namespace IdentityManager.Controllers
         }
 
         [HttpGet]
-        public IActionResult Login(string returnurl=null)
+        public IActionResult Login(string returnurl = null)
         {
             ViewData["ReturnUrl"] = returnurl;
             return View();
@@ -68,7 +71,7 @@ namespace IdentityManager.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Login(LoginViewModel model, string returnurl=null)
+        public async Task<IActionResult> Login(LoginViewModel model, string returnurl = null)
         {
             ViewData["ReturnUrl"] = returnurl;
             returnurl = returnurl ?? Url.Content("~/");
@@ -79,7 +82,7 @@ namespace IdentityManager.Controllers
                 {
                     return LocalRedirect(returnurl);
                 }
-                if(result.IsLockedOut)
+                if (result.IsLockedOut)
                 {
                     return View("Lockout");
                 }
@@ -104,15 +107,36 @@ namespace IdentityManager.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ForgotPassword(ForgotPasswordViewModel model)
         {
-           
+            if (ModelState.IsValid)
+            {
+                var user = await _userManager.FindByEmailAsync(model.Email);
+                if (user == null)
+                {
+                    return RedirectToAction("ForgotPasswordConfirmation");
+                }
+
+                var code = await _userManager.GeneratePasswordResetTokenAsync(user);
+                var callbackurl = Url.Action("ResetPassword", "Account", new { userId = user.Id, code = code }, protocol: HttpContext.Request.Scheme);
+
+                await _emailSender.SendEmailAsync(model.Email, "Reset Password - Identity Manager",
+                 "Please reset your password by clicking here: <a href=\"" + callbackurl + "\">link</a>");
+
+                return RedirectToAction("ForgotPasswordConfirmation");
+            }
 
             return View(model);
+        }
+
+        [HttpGet]
+        public IActionResult ForgotPasswordConfirmation()
+        {
+            return View();
         }
 
 
         private void AddErrors(IdentityResult result)
         {
-            foreach(var error in result.Errors)
+            foreach (var error in result.Errors)
             {
                 ModelState.AddModelError(string.Empty, error.Description);
             }
